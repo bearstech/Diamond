@@ -37,6 +37,11 @@ class DD(object):
         for key, value in self.fetch(page):
             self.data[page][key] = value
 
+    def wireless_packet_info(self):
+        d = self.data['Status_Wireless']['packet_info'][:-2].split(';')
+        infos = dict([dd.split('=') for dd in d])
+        return infos
+
     def wireless_clients(self):
         d = self.data['Status_Wireless']['active_wireless'][1:-1].split("','")
         for a in range(0, len(d) - 9, 9):
@@ -106,7 +111,7 @@ class DDWRTCollector(diamond.collector.Collector):
         """
         config = super(DDWRTCollector, self).get_default_config()
         config.update({
-            'domain':     'http://127.0.0.1',
+            'domain':     'http://12).0.0.1',
             'password':   'foo'
         })
         return config
@@ -124,6 +129,10 @@ class DDWRTCollector(diamond.collector.Collector):
                     continue
                 self.publish(stat_name, stat_value, metric_type='GAUGE')
 
+        for key, value in dd.wireless_packet_info().items():
+            stat_name = "%s.wireless.packet_info.%s" % (name, key)
+            self.publish(stat_name, float(value))
+
 if __name__ == '__main__':
     import sys
     domain = sys.argv[1]
@@ -131,3 +140,4 @@ if __name__ == '__main__':
     dd = DD(domain, 'admin', passwd)
     dd.refresh('Status_Wireless')
     print(list(dd.wireless_clients()))
+    print dd.wireless_packet_info()
