@@ -37,6 +37,22 @@ class DD(object):
         for key, value in self.fetch(page):
             self.data[page][key] = value
 
+    def lan_dhcp_leases(self):
+        d = self.data['Status_Lan']['dhcp_leases'][2:-2].split("','")
+        for a in range(0, len(d) -5, 5):
+            (name, ip, mac, lease, connect) = d[a:a+5]
+            connect = int(connect)
+            yield {'name': name,
+                   'ip': ip,
+                   'mac': mac,
+                   'lease': lease,
+                   'connect': connect}
+
+    def status_internet(self):
+        in_ = int(self.data['Status_Internet']['ttraff_in'][:-1])
+        out = int(self.data['Status_Internet']['ttraff_out'][:-1])
+        return {'ttraff_in': in_, 'ttraff_out': out}
+
     def wireless_packet_info(self):
         d = self.data['Status_Wireless']['packet_info'][:-2].split(';')
         infos = dict([dd.split('=') for dd in d])
@@ -132,6 +148,17 @@ class DDWRTCollector(diamond.collector.Collector):
         for key, value in dd.wireless_packet_info().items():
             stat_name = "%s.wireless.packet_info.%s" % (name, key)
             self.publish(stat_name, float(value))
+        dd.refresh('Status_Lan')
+        for dhcp_lease in dd.lan_dhcp_leases():
+            stat_name = "%s.lan.dhcp_lease.%s.connect" % (name, dhcp_lease['mac'].replace(':', '_'))
+            self.publish(stat_name, float(dhcp_lease['connect']))
+        dd.refresh('Status_Internet')
+        internet = dd.status_internet()
+        stat_name = "%s.internet.in" % name
+        self.publish(stat_name, float(internet['ttraff_in']))
+        stat_name = "%s.internet.out" % name
+        self.publish(stat_name, float(internet['ttraff_out']))
+
 
 if __name__ == '__main__':
     import sys
@@ -141,3 +168,7 @@ if __name__ == '__main__':
     dd.refresh('Status_Wireless')
     print(list(dd.wireless_clients()))
     print dd.wireless_packet_info()
+    dd.refresh('Status_Lan')
+    print(list(dd.lan_dhcp_leases()))
+    dd.refresh('Status_Internet')
+    print(dd.status_internet())
