@@ -2,6 +2,7 @@
 
 
 import urllib2
+import re
 import diamond.collector
 
 
@@ -111,11 +112,12 @@ class DDWRTCollector(diamond.collector.Collector):
         return config
 
     def collect(self):
+        name = re.search('//(.*)/?', self.config['domain']).group(1).replace('.', '_')  # FIXME only once
         dd = DD(self.config['domain'], 'admin', self.config['password'])
         dd.refresh('Status_Wireless')
         for mac, values in dd.wireless_clients():
             for key in ['noise', 'SNR', 'tx', 'rx', 'quality', 'signal']:
-                stat_name = '%s.%s' % (mac, key)
+                stat_name = '%s.wireless.nodes.%s.%s' % (name, mac.replace(':', '_'), key)
                 try:
                     stat_value = float(values[key])
                 except TypeError:
