@@ -74,11 +74,11 @@ def unquoteint(txt):
 
 
 def ununit(txt):
+    if txt is None or txt == 'N/A':
+        return None
     try:
         return int(txt)
     except ValueError:
-        if txt == 'N/A':
-            return None
         if txt[-1] == 'K':
             return int(txt[:-1]) * 1000
         if txt[-1] == 'M':
@@ -116,7 +116,10 @@ class DDWRTCollector(diamond.collector.Collector):
         for mac, values in dd.wireless_clients():
             for key in ['noise', 'SNR', 'tx', 'rx', 'quality', 'signal']:
                 stat_name = '%s.%s' % (mac, key)
-                stat_value = float(values[key])
+                try:
+                    stat_value = float(values[key])
+                except TypeError:
+                    continue
                 self.publish(stat_name, stat_value, metric_type='GAUGE')
 
 if __name__ == '__main__':
