@@ -44,11 +44,13 @@ class DD(object):
             signal = ununit(unquote(signal))
             noise = ununit(unquote(noise))
             snr = unquoteint(snr)
+            tx = ununit(unquote(tx))
+            rx = ununit(ununit(rx))
             yield unquote(mac), {
                 'if': unquote(interface),
                 'uptime': unquote(uptime),
-                'tx': unquote(tx),
-                'rx': unquote(rx),
+                'tx': tx,
+                'rx': rx,
                 'signal': signal,
                 'noise': noise,
                 'SNR': snr,
@@ -75,6 +77,8 @@ def ununit(txt):
     try:
         return int(txt)
     except ValueError:
+        if txt == 'N/A':
+            return None
         if txt[-1] == 'K':
             return int(txt[:-1]) * 1000
         if txt[-1] == 'M':
@@ -85,7 +89,35 @@ def ununit(txt):
 
 
 class DDWRTCollector(diamond.collector.Collector):
-    pass
+
+    def get_default_config_help(self):
+        config_help = super(DDWRTCollector,
+                            self).get_default_config_help()
+        config_help.update({
+            'domain': "",
+            'password': "",
+        })
+        return config_help
+
+    def get_default_config(self):
+        """
+        Returns the default collector settings
+        """
+        config = super(DDWRTCollector, self).get_default_config()
+        config.update({
+            'domain':     'http://127.0.0.1',
+            'password':   'foo'
+        })
+        return config
+
+    def collect(self):
+        dd = DD(self.config['domain'], 'admin', self.config['password'])
+        dd.refresh('Status_Wireless')
+        for mac, values in dd.wireless_clients():
+            for key in ['noise', 'SNR', 'tx', 'rx', 'quality', 'signal']:
+                stat_name = '%s.%s' % (mac, key)
+                stat_value = float(values[key])
+                self.publish(stat_name, stat_value, metric_type='GAUGE')
 
 if __name__ == '__main__':
     import sys
