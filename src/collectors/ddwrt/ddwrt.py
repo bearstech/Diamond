@@ -1,6 +1,13 @@
 # coding=utf-8
 
+"""
+Collect stats from DD-WRT wifi box
 
+### Dependencies
+
+ * urllib2
+
+"""
 import urllib2
 import re
 import diamond.collector
@@ -118,6 +125,11 @@ class DDWRTCollector(diamond.collector.Collector):
         config_help.update({
             'domain': "",
             'password': "",
+            'stats': """Available stats:
+ - lan
+ - wireless
+ - internet
+            """
         })
         return config_help
 
@@ -127,37 +139,41 @@ class DDWRTCollector(diamond.collector.Collector):
         """
         config = super(DDWRTCollector, self).get_default_config()
         config.update({
-            'domain':     'http://12).0.0.1',
-            'password':   'foo'
+            'domain':     'http://127.0.0.1',
+            'password':   'foo',
+            'stats':      ['lan', 'wireless', 'internet']
         })
         return config
 
     def collect(self):
         name = re.search('//(.*)/?', self.config['domain']).group(1).replace('.', '_')  # FIXME only once
         dd = DD(self.config['domain'], 'admin', self.config['password'])
-        dd.refresh('Status_Wireless')
-        for mac, values in dd.wireless_clients():
-            for key in ['noise', 'SNR', 'tx', 'rx', 'quality', 'signal']:
-                stat_name = '%s.wireless.nodes.%s.%s' % (name, mac.replace(':', '_'), key)
-                try:
-                    stat_value = float(values[key])
-                except TypeError:
-                    continue
-                self.publish(stat_name, stat_value, metric_type='GAUGE')
+        if 'wireless' in self.config['stats']:
+            dd.refresh('Status_Wireless')
+            for mac, values in dd.wireless_clients():
+                for key in ['noise', 'SNR', 'tx', 'rx', 'quality', 'signal']:
+                    stat_name = '%s.wireless.nodes.%s.%s' % (name, mac.replace(':', '_'), key)
+                    try:
+                        stat_value = float(values[key])
+                    except TypeError:
+                        continue
+                    self.publish(stat_name, stat_value, metric_type='GAUGE')
 
-        for key, value in dd.wireless_packet_info().items():
-            stat_name = "%s.wireless.packet_info.%s" % (name, key)
-            self.publish(stat_name, float(value))
-        dd.refresh('Status_Lan')
-        for dhcp_lease in dd.lan_dhcp_leases():
-            stat_name = "%s.lan.dhcp_lease.%s.connect" % (name, dhcp_lease['mac'].replace(':', '_'))
-            self.publish(stat_name, float(dhcp_lease['connect']))
-        dd.refresh('Status_Internet')
-        internet = dd.status_internet()
-        stat_name = "%s.internet.in" % name
-        self.publish(stat_name, float(internet['ttraff_in']))
-        stat_name = "%s.internet.out" % name
-        self.publish(stat_name, float(internet['ttraff_out']))
+            for key, value in dd.wireless_packet_info().items():
+                stat_name = "%s.wireless.packet_info.%s" % (name, key)
+                self.publish(stat_name, float(value))
+        if 'lan' in self.config['stats']:
+            dd.refresh('Status_Lan')
+            for dhcp_lease in dd.lan_dhcp_leases():
+                stat_name = "%s.lan.dhcp_lease.%s.connect" % (name, dhcp_lease['mac'].replace(':', '_'))
+                self.publish(stat_name, float(dhcp_lease['connect']))
+        if 'internet' in self.config['stats']:
+            dd.refresh('Status_Internet')
+            internet = dd.status_internet()
+            stat_name = "%s.internet.in" % name
+            self.publish(stat_name, float(internet['ttraff_in']))
+            stat_name = "%s.internet.out" % name
+            self.publish(stat_name, float(internet['ttraff_out']))
 
 
 if __name__ == '__main__':
