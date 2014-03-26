@@ -145,6 +145,7 @@ class ElasticSearchCollector(diamond.collector.Collector):
             self.log.error('Unable to import json')
             return {}
         self.collect_cluster()
+        self.collect_health()
         self.collect_nodes()
 
     def collect_cluster(self):
@@ -178,6 +179,20 @@ class ElasticSearchCollector(diamond.collector.Collector):
                 metrics['cluster.status.%s' % other] = 0
             metrics['cluster.status.%s' % status] = 1
 
+            for key, value in metrics.items():
+                self.publish(key, value)
+
+    def collect_health(self):
+
+        metrics = {}
+
+        result = self._get('_cluster/health')
+        if result:
+            for key in ['number_of_nodes', 'number_of_data_nodes',
+                        'active_primary_shards', 'active_shards',
+                        'relocating_shards', 'initializing_shards',
+                        'unassigned_shards']:
+                metrics['cluster.health.%s' % key] = result[key]
             for key, value in metrics.items():
                 self.publish(key, value)
 
