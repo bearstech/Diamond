@@ -28,6 +28,20 @@ import diamond.collector
 RE_LOGSTASH_INDEX = re.compile('^(.*)-\d\d\d\d\.\d\d\.\d\d$')
 
 
+def walk_rec(path, datas):
+    for key, value in datas.items():
+        if type(value) is dict:
+            for kv in walk_rec(path + [key], value):
+                yield kv
+        else:
+            yield path + [key], value
+
+
+def walk(datas):
+    for path, value in walk_rec([], datas):
+        yield ".".join(path), value
+
+
 class ElasticSearchCollector(diamond.collector.Collector):
 
     def __init__(self, *args, **kwargs):
@@ -44,12 +58,12 @@ class ElasticSearchCollector(diamond.collector.Collector):
             # omitting the use of the alias in the metrics path
             instance_list.append('@%s:%s' % (host, port))
 
-        self.instances = {}
+        self.instances = []
         for instance in instance_list:
             if '@' in instance:
                 (alias, hostport) = instance.split('@', 1)
             else:
-                alias = 'default'
+                alias = ''
                 hostport = instance
 
             if ':' in hostport:
@@ -58,7 +72,7 @@ class ElasticSearchCollector(diamond.collector.Collector):
                 host = hostport
                 port = 9200
 
-            self.instances[alias] = (host, int(port))
+            self.instances.append((alias, host, int(port)))
 
     def get_default_config_help(self):
         config_help = super(ElasticSearchCollector,
@@ -175,210 +189,118 @@ class ElasticSearchCollector(diamond.collector.Collector):
         else:
             metrics[metric_path] = value
 
-    def collect_instance_cluster_stats(self, host, port, metrics):
-        result = self._get(host, port, '_cluster/health')
-        if not result:
-            return
-
-        self._add_metric(metrics, 'cluster_health.nodes.total',
-                         result, ['number_of_nodes'])
-        self._add_metric(metrics, 'cluster_health.nodes.data',
-                         result, ['number_of_data_nodes'])
-        self._add_metric(metrics, 'cluster_health.shards.active_primary',
-                         result, ['active_primary_shards'])
-        self._add_metric(metrics, 'cluster_health.shards.active',
-                         result, ['active_shards'])
-        self._add_metric(metrics, 'cluster_health.shards.relocating',
-                         result, ['relocating_shards'])
-        self._add_metric(metrics, 'cluster_health.shards.unassigned',
-                         result, ['unassigned_shards'])
-        self._add_metric(metrics, 'cluster_health.shards.initializing',
-                         result, ['initializing_shards'])
-
-    def collect_instance_index_stats(self, host, port, metrics):
-        result = self._get(host, port,
-                           '_stats?clear=true&docs=true&store=true&'
-                           + 'indexing=true&get=true&search=true', '_all')
-        if not result:
-            return
-
-        _all = result['_all']
-        self._index_metrics(metrics, 'indices._all', _all['primaries'])
-
-        if 'indices' in _all:
-            indices = _all['indices']
-        elif 'indices' in result:          # elasticsearch >= 0.90RC2
-            indices = result['indices']
-        else:
-            return
-
-        for name, index in indices.iteritems():
-            self._index_metrics(metrics, 'indices.%s' % name,
-                                index['primaries'])
-
     def collect_instance(self, alias, host, port):
-        result = self._get(host, port, '_nodes/_local/stats?all=true', 'nodes')
-        if not result:
-            return
-
-        metrics = {}
-        node = result['nodes'].keys()[0]
-        data = result['nodes'][node]
-
-        #
-        # http connections to ES
-        metrics['http.current'] = data['http']['current_open']
-
-        #
-        # indices
-        indices = data['indices']
-        metrics['indices.docs.count'] = indices['docs']['count']
-        metrics['indices.docs.deleted'] = indices['docs']['deleted']
-
-        metrics['indices.datastore.size'] = indices['store']['size_in_bytes']
-
-        transport = data['transport']
-        metrics['transport.rx.count'] = transport['rx_count']
-        metrics['transport.rx.size'] = transport['rx_size_in_bytes']
-        metrics['transport.tx.count'] = transport['tx_count']
-        metrics['transport.tx.size'] = transport['tx_size_in_bytes']
-
-        # elasticsearch < 0.90RC2
-        if 'cache' in indices:
-            cache = indices['cache']
-
-            self._add_metric(metrics, 'cache.bloom.size', cache,
-                             ['bloom_size_in_bytes'])
-            self._add_metric(metrics, 'cache.field.evictions', cache,
-                             ['field_evictions'])
-            self._add_metric(metrics, 'cache.field.size', cache,
-                             ['field_size_in_bytes'])
-            metrics['cache.filter.count'] = cache['filter_count']
-            metrics['cache.filter.evictions'] = cache['filter_evictions']
-            metrics['cache.filter.size'] = cache['filter_size_in_bytes']
-            self._add_metric(metrics, 'cache.id.size', cache,
-                             ['id_cache_size_in_bytes'])
-
-        # elasticsearch >= 0.90RC2
-        if 'filter_cache' in indices:
-            cache = indices['filter_cache']
-
-            metrics['cache.filter.evictions'] = cache['evictions']
-            metrics['cache.filter.size'] = cache['memory_size_in_bytes']
-            self._add_metric(metrics, 'cache.filter.count', cache, ['count'])
-
-        # elasticsearch >= 0.90RC2
-        if 'id_cache' in indices:
-            cache = indices['id_cache']
-
-            self._add_metric(metrics, 'cache.id.size', cache,
-                             ['memory_size_in_bytes'])
-
-        # elasticsearch >= 0.90
-        if 'fielddata' in indices:
-            fielddata = indices['fielddata']
-            self._add_metric(metrics, 'fielddata.size', fielddata,
-                             ['memory_size_in_bytes'])
-            self._add_metric(metrics, 'fielddata.evictions', fielddata,
-                             ['evictions'])
-
-        #
-        # process mem/cpu (may not be present, depending on access restrictions)
-        self._add_metric(metrics, 'process.cpu.percent', data,
-                         ['process', 'cpu', 'percent'])
-        self._add_metric(metrics, 'process.mem.resident', data,
-                         ['process', 'mem', 'resident_in_bytes'])
-        self._add_metric(metrics, 'process.mem.share', data,
-                         ['process', 'mem', 'share_in_bytes'])
-        self._add_metric(metrics, 'process.mem.virtual', data,
-                         ['process', 'mem', 'total_virtual_in_bytes'])
-
-        #
-        # filesystem (may not be present, depending on access restrictions)
-        if 'fs' in data and 'data' in data['fs'] and data['fs']['data']:
-            fs_data = data['fs']['data'][0]
-            self._add_metric(metrics, 'disk.reads.count', fs_data,
-                             ['disk_reads'])
-            self._add_metric(metrics, 'disk.reads.size', fs_data,
-                             ['disk_read_size_in_bytes'])
-            self._add_metric(metrics, 'disk.writes.count', fs_data,
-                             ['disk_writes'])
-            self._add_metric(metrics, 'disk.writes.size', fs_data,
-                             ['disk_write_size_in_bytes'])
-
-        #
-        # jvm
-        if 'jvm' in self.config['stats']:
-            jvm = data['jvm']
-            mem = jvm['mem']
-            for k in ('heap_used', 'heap_committed', 'non_heap_used',
-                      'non_heap_committed'):
-                metrics['jvm.mem.%s' % k] = mem['%s_in_bytes' % k]
-
-            if 'heap_used_percent' in mem:
-                metrics['jvm.mem.heap_used_percent'] = mem['heap_used_percent']
-
-            for pool, d in mem['pools'].iteritems():
-                pool = pool.replace(' ', '_')
-                metrics['jvm.mem.pools.%s.used' % pool] = d['used_in_bytes']
-                metrics['jvm.mem.pools.%s.max' % pool] = d['max_in_bytes']
-
-            metrics['jvm.threads.count'] = jvm['threads']['count']
-
-            gc = jvm['gc']
-            collection_count = 0
-            collection_time_in_millis = 0
-            for collector, d in gc['collectors'].iteritems():
-                metrics['jvm.gc.collection.%s.count' % collector] = d[
-                    'collection_count']
-                collection_count += d['collection_count']
-                metrics['jvm.gc.collection.%s.time' % collector] = d[
-                    'collection_time_in_millis']
-                collection_time_in_millis += d['collection_time_in_millis']
-            # calculate the totals, as they're absent in elasticsearch > 0.90.10
-            if 'collection_count' in gc:
-                metrics['jvm.gc.collection.count'] = gc['collection_count']
-            else:
-                metrics['jvm.gc.collection.count'] = collection_count
-
-            k = 'collection_time_in_millis'
-            if k in gc:
-                metrics['jvm.gc.collection.time'] = gc[k]
-            else:
-                metrics['jvm.gc.collection.time'] = collection_time_in_millis
-
-        #
-        # thread_pool
-        if 'thread_pool' in self.config['stats']:
-            self._copy_two_level(metrics, 'thread_pool', data['thread_pool'])
-
-        #
-        # network
-        self._copy_two_level(metrics, 'network', data['network'])
-
-        #
-        # cluster (optional)
-        if str_to_bool(self.config['cluster']):
-            self.collect_instance_cluster_stats(host, port, metrics)
-
-        #
-        # indices (optional)
-        if 'indices' in self.config['stats']:
-            self.collect_instance_index_stats(host, port, metrics)
-
-        #
-        # all done, now publishing all metrics
-        for key in metrics:
-            full_key = key
-            if alias != '':
-                full_key = '%s.%s' % (alias, full_key)
-            self.publish(full_key, metrics[key])
+        self.collect_cluster(alias, host, port)
+        self.collect_health(alias, host, port)
+        self.collect_nodes(alias, host, port)
 
     def collect(self):
         if json is None:
             self.log.error('Unable to import json')
             return {}
 
-        for alias in sorted(self.instances):
-            (host, port) = self.instances[alias]
+        for alias, host, port in self.instances:
+            if alias == '':
+                alias = self._get(host, port, '_cluster/health')['cluster_name']
             self.collect_instance(alias, host, port)
+
+    def collect_cluster(self, alias, host, port):
+
+        result = self._get(host, port, '_cluster/stats')
+        metrics = {}
+        if result:
+            for k, v in walk(result):
+                if  k not in ['nodes.plugins', 'nodes.os.cpu', 'nodes.versions',
+                              'nodes.jvm.versions', 'status', 'cluster_name'
+                              ] and not k.endswith('.memory_size'):
+                    metrics[k] = v
+            status = result['status']
+            for other in ['red', 'yellow', 'green']:
+                metrics['cluster.status.%s' % other] = 0
+            metrics['cluster.status.%s' % status] = 1
+
+            for key, value in metrics.items():
+                self.publish(".".join([alias, key]), value)
+
+    def collect_health(self, alias, host, port):
+
+        metrics = {}
+
+        result = self._get(host, port, '_cluster/health')
+        if result:
+            for key in ['number_of_nodes', 'number_of_data_nodes',
+                        'active_primary_shards', 'active_shards',
+                        'relocating_shards', 'initializing_shards',
+                        'unassigned_shards']:
+                metrics['cluster.health.%s' % key] = result[key]
+            for key, value in metrics.items():
+                self.publish(".".join([alias, key]), value)
+
+    def collect_nodes(self, alias, host, port):
+        metrics = {}
+        result = self._get(host, port, '_nodes/stats?all=true')
+        if not result:
+            return
+
+        for node, data in result['nodes'].items():
+            name = data['name']
+
+            #
+            # http connections to ES
+            metrics['nodes.%s.http.current' % name] = data['http']['current_open']
+
+            #
+            # indices
+            for k, v in walk(data['indices']):
+                if k not in ['percolate.memory_size']: # this key is human readable.
+                    metrics['nodes.%s.indices.%s' % (name, k)] = v
+
+            #
+            # thread_pool
+            if 'thread_pool' in self.config['stats']:
+                for k, v in walk(data['thread_pool']):
+                    metrics['nodes.%s.thread_pool.%s' % (name, k)] = v
+
+            for k, v in walk(data['process']):
+                if k not in ['timestamp']:
+                    metrics['nodes.%s.process.%s' % (name, k)] = v
+            #
+            # jvm
+            if 'jvm' in self.config['stats']:
+                for k, v in walk(data['jvm']):
+                    if k not in ['timestamp', 'uptime_in_millis']:
+                        metrics['nodes.%s.jvm.%s' % (name, k)] = v
+
+            for k, v in walk(data['transport']):
+                metrics['nodes.%s.transport.%s' % (name, k)] = v
+
+            for n, datas in enumerate(data['fs']['data']):
+                for k, v in datas.items():
+                    if k not in ['path', 'mount', 'dev']:
+                        metrics['nodes.%s.fs.datas.%i.%s' % (name, n, k)] = v
+
+
+            if 'indices' in self.config['stats']:
+                #
+                # individual index stats
+                result = self._get(host, port, '_stats?clear=true&docs=true&store=true&'
+                                + 'indexing=true&get=true&search=true')
+                if not result:
+                    return
+
+                _all = result['_all']
+                self._index_metrics(metrics, 'indices._all', _all['primaries'])
+
+                if 'indices' in _all:
+                    indices = _all['indices']
+                elif 'indices' in result:          # elasticsearch >= 0.90RC2
+                    indices = result['indices']
+                else:
+                    return
+
+                for name, index in indices.iteritems():
+                    self._index_metrics(metrics, 'indices.%s' % name,
+                                        index['primaries'])
+
+        for key, value in metrics.items():
+            self.publish(".".join([alias, key]), value)
