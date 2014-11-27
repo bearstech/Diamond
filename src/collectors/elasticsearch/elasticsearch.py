@@ -242,7 +242,12 @@ class ElasticSearchCollector(diamond.collector.Collector):
 
     def collect_nodes(self, alias, host, port):
         metrics = {}
-        result = self._get(host, port, '_nodes/stats?all=true')
+        # http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/cluster-nodes-stats.html#_nodes_statistics
+        s = ["os", "process", "jvm", "network", "transport", "http", "fs",
+             "breaker", "thread_pool"]
+        if 'indices' in self.config['stats']:
+            s.append("indices")
+        result = self._get(host, port, '_nodes/stats/%s' % ",".join(s))
         if not result:
             return
 
@@ -255,16 +260,16 @@ class ElasticSearchCollector(diamond.collector.Collector):
 
             #
             # indices
-            for k, v in walk(data['indices']):
-                if k not in ['percolate.memory_size']: # this key is human readable.
-                    metrics['nodes.%s.indices.%s' % (name, k)] = v
+            if 'indices' in data:
+                for k, v in walk(data['indices']):
+                    if k not in ['percolate.memory_size']:  # this key is human readable.
+                        metrics['nodes.%s.indices.%s' % (name, k)] = v
 
             #
             # thread_pool
             if 'thread_pool' in self.config['stats']:
                 for k, v in walk(data['thread_pool']):
                     metrics['nodes.%s.thread_pool.%s' % (name, k)] = v
-
             for k, v in walk(data['process']):
                 if k not in ('timestamp'):
                     metrics['nodes.%s.process.%s' % (name, k)] = v
