@@ -190,9 +190,12 @@ class ElasticSearchCollector(diamond.collector.Collector):
             metrics[metric_path] = value
 
     def collect_instance(self, alias, host, port):
-        self.collect_cluster(alias, host, port)
         self.collect_health(alias, host, port)
         self.collect_nodes(alias, host, port)
+        #
+        # cluster (optional)
+        if str_to_bool(self.config['cluster']):
+            self.collect_cluster(alias, host, port)
 
     def collect(self):
         if json is None:
