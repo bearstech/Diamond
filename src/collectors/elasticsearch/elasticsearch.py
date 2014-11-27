@@ -192,10 +192,6 @@ class ElasticSearchCollector(diamond.collector.Collector):
     def collect_instance(self, alias, host, port):
         self.collect_health(alias, host, port)
         self.collect_nodes(alias, host, port)
-        #
-        # cluster (optional)
-        if str_to_bool(self.config['cluster']):
-            self.collect_cluster(alias, host, port)
 
     def collect(self):
         if json is None:
@@ -206,25 +202,6 @@ class ElasticSearchCollector(diamond.collector.Collector):
             if alias == '':
                 alias = self._get(host, port, '_cluster/health')['cluster_name']
             self.collect_instance(alias, host, port)
-
-    def collect_cluster(self, alias, host, port):
-
-        # [FIXME] fetch less info
-        result = self._get(host, port, '_cluster/stats')
-        metrics = {}
-        if result:
-            for k, v in walk(result):
-                if k not in ['nodes.plugins', 'nodes.os.cpu', 'nodes.versions',
-                             'nodes.jvm.versions', 'status', 'cluster_name'
-                             ] and not k.endswith('.memory_size'):
-                    metrics[k] = v
-            status = result['status']
-            for other in ['red', 'yellow', 'green']:
-                metrics['cluster.status.%s' % other] = 0
-            metrics['cluster.status.%s' % status] = 1
-
-            for key, value in metrics.items():
-                self.publish(".".join([alias, key]), value)
 
     def collect_health(self, alias, host, port):
 
@@ -239,6 +216,12 @@ class ElasticSearchCollector(diamond.collector.Collector):
                 metrics['cluster.health.%s' % key] = result[key]
             for key, value in metrics.items():
                 self.publish(".".join([alias, key]), value)
+
+            status = result['status']
+            for other in ['red', 'yellow', 'green']:
+                metrics['cluster.status.%s' % other] = 0
+            metrics['cluster.status.%s' % status] = 1
+
 
     def collect_nodes(self, alias, host, port):
         metrics = {}
