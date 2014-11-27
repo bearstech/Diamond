@@ -129,7 +129,7 @@ class ElasticSearchCollector(diamond.collector.Collector):
                            + " json object")
             return False
 
-        if assert_key and not assert_key in doc:
+        if assert_key and assert_key not in doc:
             self.log.error("Bad response from elasticsearch, expected key "
                            "'%s' was missing for %s" % (assert_key, url))
             return False
@@ -206,13 +206,14 @@ class ElasticSearchCollector(diamond.collector.Collector):
 
     def collect_cluster(self, alias, host, port):
 
+        # [FIXME] fetch less info
         result = self._get(host, port, '_cluster/stats')
         metrics = {}
         if result:
             for k, v in walk(result):
-                if  k not in ['nodes.plugins', 'nodes.os.cpu', 'nodes.versions',
-                              'nodes.jvm.versions', 'status', 'cluster_name'
-                              ] and not k.endswith('.memory_size'):
+                if k not in ['nodes.plugins', 'nodes.os.cpu', 'nodes.versions',
+                             'nodes.jvm.versions', 'status', 'cluster_name'
+                             ] and not k.endswith('.memory_size'):
                     metrics[k] = v
             status = result['status']
             for other in ['red', 'yellow', 'green']:
@@ -262,7 +263,7 @@ class ElasticSearchCollector(diamond.collector.Collector):
                     metrics['nodes.%s.thread_pool.%s' % (name, k)] = v
 
             for k, v in walk(data['process']):
-                if k not in ['timestamp']:
+                if k not in ('timestamp'):
                     metrics['nodes.%s.process.%s' % (name, k)] = v
             #
             # jvm
@@ -279,12 +280,12 @@ class ElasticSearchCollector(diamond.collector.Collector):
                     if k not in ['path', 'mount', 'dev']:
                         metrics['nodes.%s.fs.datas.%i.%s' % (name, n, k)] = v
 
-
             if 'indices' in self.config['stats']:
                 #
                 # individual index stats
-                result = self._get(host, port, '_stats?clear=true&docs=true&store=true&'
-                                + 'indexing=true&get=true&search=true')
+                result = self._get(host, port, '_stats?clear=true&docs=true&'
+                                   + 'store=true&indexing=true&get=true&'
+                                   + 'search=true')
                 if not result:
                     return
 
