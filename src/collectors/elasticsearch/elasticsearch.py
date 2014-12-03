@@ -226,10 +226,12 @@ class ElasticSearchCollector(diamond.collector.Collector):
     def collect_nodes(self, alias, host, port):
         metrics = {}
         # http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/cluster-nodes-stats.html#_nodes_statistics
-        s = ["os", "process", "jvm", "network", "transport", "http", "fs",
+        s = ["os", "process", "network", "transport", "http", "fs",
              "breaker", "thread_pool"]
-        if 'indices' in self.config['stats']:
+        if "indices" in self.config["stats"]:
             s.append("indices")
+        if "jvm" in self.config["stats"]:
+            s.append("jvm")
         result = self._get(host, port, '_nodes/stats/%s' % ",".join(s))
         if not result:
             return
